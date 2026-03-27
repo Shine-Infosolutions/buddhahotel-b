@@ -1,7 +1,8 @@
 const router = require('express').Router();
 const auth = require('../middleware/auth');
-const { getBookings, getBooking, createBooking, updateBooking, deleteBooking } = require('../controllers/bookingController');
+const { getBookings, getBooking, createBooking, updateBooking, deleteBooking, checkAvailability } = require('../controllers/bookingController');
 
+router.get('/check-availability', auth, checkAvailability);
 router.get('/', auth, getBookings);
 router.get('/:id', auth, getBooking);
 router.post('/', auth, createBooking);
