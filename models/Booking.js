@@ -19,7 +19,7 @@ const bookingSchema = new mongoose.Schema({
   purposeOfVisit: { type: String },
   extraBedChargePerDay: { type: Number, default: 0 },
   remarks: { type: String },
-  status: { type: String, enum: ['confirmed', 'checked_in', 'checked_out', 'cancelled'], default: 'confirmed' },
+  status: { type: String, enum: ['booked', 'checked_in', 'checked_out', 'cancelled'], default: 'booked' },
   // Payment
   taxableAmount: { type: Number, default: 0 },
   cgstRate: { type: Number, default: 2.5 },
@@ -30,6 +30,8 @@ const bookingSchema = new mongoose.Schema({
   paymentStatus: { type: String, enum: ['pending', 'paid', 'partial'], default: 'pending' },
   advancePayments: [advancePaymentSchema],
   billingInstruction: { type: String },
+  grcNumber: { type: String, unique: true },
+  invoiceNumber: { type: String, unique: true },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Booking', bookingSchema);

@@ -9,6 +9,7 @@ const guestSchema = new mongoose.Schema({
   whatsappNo: { type: String },
   email: { type: String },
   address: { type: String },
+  pinCode: { type: String },
   city: { type: String },
   state: { type: String },
   nationality: { type: String },

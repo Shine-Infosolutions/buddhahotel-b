@@ -21,7 +21,8 @@ exports.getGuest = async (req, res) => {
 
 exports.createGuest = async (req, res) => {
   try {
-    const guest = await Guest.create(req.body);
+    const { _id, __v, createdAt, updatedAt, ...data } = req.body;
+    const guest = await Guest.create(data);
     res.status(201).json(guest);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -30,7 +31,8 @@ exports.createGuest = async (req, res) => {
 
 exports.updateGuest = async (req, res) => {
   try {
-    const guest = await Guest.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const { _id, __v, createdAt, updatedAt, ...data } = req.body;
+    const guest = await Guest.findByIdAndUpdate(req.params.id, { $set: data }, { new: true, runValidators: false });
     if (!guest) return res.status(404).json({ message: 'Guest not found' });
     res.json(guest);
   } catch (err) {

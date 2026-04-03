@@ -1,13 +1,61 @@
 const Booking = require('../models/Booking');
 const Room = require('../models/Room');
 
+const generateGRC = async () => {
+  const last = await Booking.findOne({ grcNumber: { $exists: true } }).sort({ createdAt: -1 }).select('grcNumber');
+  const lastNum = last ? parseInt(last.grcNumber.replace('GRC', ''), 10) : 0;
+  return `GRC${String(lastNum + 1).padStart(4, '0')}`;
+};
+
+const generateInvoice = async (checkIn) => {
+  const date = new Date(checkIn);
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const prefix = `BA/${mm}/`;
+  const last = await Booking.findOne({ invoiceNumber: { $regex: `^${prefix}` } }).sort({ createdAt: -1 }).select('invoiceNumber');
+  const lastNum = last ? parseInt(last.invoiceNumber.split('/')[2], 10) : 0;
+  return `${prefix}${String(lastNum + 1).padStart(4, '0')}`;
+};
+
+exports.searchGuest = async (req, res) => {
+  try {
+    const { q } = req.query;
+    const guests = await require('../models/Guest').find({
+      $or: [{ name: { $regex: q, $options: 'i' } }, { phone: { $regex: q, $options: 'i' } }],
+    }).limit(10);
+    res.json(guests);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.getBookingByGRC = async (req, res) => {
+  try {
+    const booking = await Booking.findOne({ grcNumber: req.params.grc }).populate('guest');
+    if (!booking) return res.status(404).json({ message: 'GRC not found' });
+    res.json(booking.guest);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.previewNumbers = async (req, res) => {
+  try {
+    const { checkIn } = req.query;
+    const grc = await generateGRC();
+    const invoice = await generateInvoice(checkIn || new Date());
+    res.json({ grcNumber: grc, invoiceNumber: invoice });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 exports.checkAvailability = async (req, res) => {
   try {
     const { checkIn, checkOut, categoryId, excludeBookingId } = req.query;
     if (!checkIn || !checkOut) return res.status(400).json({ message: 'checkIn and checkOut are required' });
 
     const overlapQuery = {
-      status: { $in: ['confirmed', 'checked_in'] },
+      status: { $in: ['booked', 'checked_in'] },
       checkIn: { $lt: new Date(checkOut) },
       checkOut: { $gt: new Date(checkIn) },
     };
@@ -39,7 +87,10 @@ exports.checkAvailability = async (req, res) => {
 
 exports.getBookings = async (req, res) => {
   try {
-    const bookings = await Booking.find().populate('guest').populate({ path: 'room', populate: { path: 'category' } });
+    const bookings = await Booking.find()
+      .populate('guest')
+      .populate({ path: 'room', populate: { path: 'category' } })
+      .sort({ createdAt: -1 });
     res.json(bookings);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -65,7 +116,7 @@ exports.createBooking = async (req, res) => {
 
     // Check all rooms are available for the date range
     const overlapping = await Booking.find({
-      status: { $in: ['confirmed', 'checked_in'] },
+      status: { $in: ['booked', 'checked_in'] },
       room: { $in: selectedRoomIds },
       checkIn: { $lt: new Date(checkOut) },
       checkOut: { $gt: new Date(checkIn) },
@@ -82,8 +133,11 @@ exports.createBooking = async (req, res) => {
       const taxableAmount = roomCost + extraBedCost;
       const cgst = (taxableAmount * cgstRate) / 100;
       const sgst = (taxableAmount * sgstRate) / 100;
-      const totalAmount = taxableAmount + cgst + sgst - discount;
-      const booking = await Booking.create({ ...req.body, room: roomDoc._id, taxableAmount, totalAmount });
+      const totalAmount = Math.round((taxableAmount + cgst + sgst - discount) * 100) / 100;
+      const grcNumber = await generateGRC();
+      const invoiceNumber = await generateInvoice(checkIn);
+      const booking = await Booking.create({ ...req.body, room: roomDoc._id, taxableAmount, totalAmount, status: req.body.status || 'booked', grcNumber, invoiceNumber });
+      await Room.findByIdAndUpdate(roomDoc._id, { status: 'occupied' });
       bookings.push(booking);
     }
 
@@ -95,10 +149,15 @@ exports.createBooking = async (req, res) => {
 
 exports.updateBooking = async (req, res) => {
   try {
-    const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true })
+      .populate('guest')
+      .populate({ path: 'room', populate: { path: 'category' } });
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
+    if (req.body.status === 'checked_in') {
+      await Room.findByIdAndUpdate(booking.room?._id || booking.room, { status: 'occupied' });
+    }
     if (req.body.status === 'checked_out' || req.body.status === 'cancelled') {
-      await Room.findByIdAndUpdate(booking.room, { status: 'available' });
+      await Room.findByIdAndUpdate(booking.room?._id || booking.room, { status: 'available' });
     }
     res.json(booking);
   } catch (err) {
