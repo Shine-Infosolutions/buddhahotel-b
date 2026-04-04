@@ -71,7 +71,15 @@ exports.getInvoiceByBooking = async (req, res) => {
     const days = Math.max(1, Math.ceil((new Date(booking.checkOut) - new Date(booking.checkIn)) / (1000 * 60 * 60 * 24)));
     const roomRate = booking.room?.price || 0;
     const roomRentAmount = roomRate * days;
-    const extraBedTotal = (booking.extraBedChargePerDay || 0) * days;
+
+    // Calculate extra bed total from extraBeds array
+    const extraBedTotal = (booking.extraBeds || []).reduce((sum, eb) => {
+      const ebFrom = eb.from ? new Date(eb.from) : new Date(booking.checkIn);
+      const ebTo = eb.to ? new Date(eb.to) : new Date(booking.checkOut);
+      const ebDays = Math.max(1, Math.ceil((ebTo - ebFrom) / (1000 * 60 * 60 * 24)));
+      return sum + (eb.chargePerDay || 0) * ebDays;
+    }, 0);
+
     const taxableAmount = booking.taxableAmount || (roomRentAmount + extraBedTotal);
     const cgstRate = booking.cgstRate || 2.5;
     const sgstRate = booking.sgstRate || 2.5;
@@ -90,17 +98,25 @@ exports.getInvoiceByBooking = async (req, res) => {
       taxRate: cgstRate + sgstRate,
       amount: roomRentAmount,
     });
-    if (extraBedTotal > 0) {
-      items.push({
-        date: new Date(booking.checkIn).toLocaleDateString('en-GB'),
-        particulars: `Extra Bed Charge (${days} nights × ₹${booking.extraBedChargePerDay})`,
-        roomRate: booking.extraBedChargePerDay,
-        declaredRate: extraBedTotal,
-        hsn: 996311,
-        taxRate: cgstRate + sgstRate,
-        amount: extraBedTotal,
-      });
-    }
+
+    // Add each extra bed as a separate line item
+    (booking.extraBeds || []).forEach((eb) => {
+      const ebFrom = eb.from ? new Date(eb.from) : new Date(booking.checkIn);
+      const ebTo = eb.to ? new Date(eb.to) : new Date(booking.checkOut);
+      const ebDays = Math.max(1, Math.ceil((ebTo - ebFrom) / (1000 * 60 * 60 * 24)));
+      const ebAmount = (eb.chargePerDay || 0) * ebDays;
+      if (ebAmount > 0) {
+        items.push({
+          date: ebFrom.toLocaleDateString('en-GB'),
+          particulars: `Extra Bed Charge (${ebDays} night${ebDays > 1 ? 's' : ''} × ₹${eb.chargePerDay})`,
+          roomRate: eb.chargePerDay,
+          declaredRate: ebAmount,
+          hsn: 996311,
+          taxRate: cgstRate + sgstRate,
+          amount: ebAmount,
+        });
+      }
+    });
 
     const totalAdvance = (booking.advancePayments || []).reduce((s, p) => s + (p.amount || 0), 0);
 
