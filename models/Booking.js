@@ -14,6 +14,17 @@ const extraBedSchema = new mongoose.Schema({
   to: { type: Date },
 });
 
+const customPriceSchema = new mongoose.Schema({
+  room: { type: mongoose.Schema.Types.ObjectId, ref: 'Room' },
+  price: { type: Number, required: true },
+});
+
+const roomDiscountSchema = new mongoose.Schema({
+  room: { type: mongoose.Schema.Types.ObjectId, ref: 'Room' },
+  discountType: { type: String, enum: ['percentage', 'fixed'], default: 'fixed' },
+  discountValue: { type: Number, default: 0 },
+});
+
 const bookingSchema = new mongoose.Schema({
   guest: { type: mongoose.Schema.Types.ObjectId, ref: 'Guest', required: true },
   rooms: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Room' }],
@@ -26,6 +37,8 @@ const bookingSchema = new mongoose.Schema({
   arrivalFrom: { type: String },
   purposeOfVisit: { type: String },
   extraBeds: [extraBedSchema],
+  customPrices: [customPriceSchema],
+  roomDiscounts: [roomDiscountSchema],
   remarks: { type: String },
   status: { type: String, enum: ['booked', 'checked_in', 'checked_out', 'cancelled'], default: 'booked' },
   taxableAmount: { type: Number, default: 0 },

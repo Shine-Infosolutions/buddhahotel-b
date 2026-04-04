@@ -113,7 +113,7 @@ exports.getBooking = async (req, res) => {
 
 exports.createBooking = async (req, res) => {
   try {
-    const { rooms: roomIds, room, checkIn, checkOut, cgstRate = 2.5, sgstRate = 2.5, discount = 0, extraBeds = [] } = req.body;
+    const { rooms: roomIds, room, checkIn, checkOut, cgstRate = 2.5, sgstRate = 2.5, discount = 0, extraBeds = [], customPrices = [], roomDiscounts = [] } = req.body;
 
     const selectedRoomIds = roomIds?.length ? roomIds : [room];
 
@@ -134,9 +134,27 @@ exports.createBooking = async (req, res) => {
     // Calculate total cost for all rooms
     let totalRoomCost = 0;
     let totalExtraBedCost = 0;
+    let totalRoomDiscount = 0;
 
     for (const roomDoc of roomDocs) {
-      totalRoomCost += days * roomDoc.price;
+      // Check if there's a custom price for this room
+      const customPriceObj = customPrices.find((cp) => cp.room === roomDoc._id.toString());
+      const roomPrice = customPriceObj ? Number(customPriceObj.price) : roomDoc.price;
+      const roomSubtotal = days * roomPrice;
+      
+      // Calculate room discount
+      const roomDiscountObj = roomDiscounts.find((rd) => rd.room === roomDoc._id.toString());
+      let roomDiscountAmount = 0;
+      if (roomDiscountObj) {
+        if (roomDiscountObj.discountType === 'percentage') {
+          roomDiscountAmount = (roomSubtotal * Number(roomDiscountObj.discountValue)) / 100;
+        } else {
+          roomDiscountAmount = Number(roomDiscountObj.discountValue);
+        }
+      }
+      
+      totalRoomCost += roomSubtotal;
+      totalRoomDiscount += roomDiscountAmount;
 
       // Find extra bed for this room
       const eb = extraBeds.find((e) => e.room === roomDoc._id.toString());
@@ -146,7 +164,7 @@ exports.createBooking = async (req, res) => {
       }
     }
 
-    const taxableAmount = totalRoomCost + totalExtraBedCost;
+    const taxableAmount = totalRoomCost + totalExtraBedCost - totalRoomDiscount;
     const cgst = (taxableAmount * cgstRate) / 100;
     const sgst = (taxableAmount * sgstRate) / 100;
     const totalAmount = Math.round((taxableAmount + cgst + sgst - discount) * 100) / 100;
@@ -161,6 +179,8 @@ exports.createBooking = async (req, res) => {
       taxableAmount,
       totalAmount,
       extraBeds,
+      customPrices,
+      roomDiscounts,
       status: req.body.status || 'booked',
       grcNumber,
       invoiceNumber,
@@ -181,12 +201,14 @@ exports.updateBooking = async (req, res) => {
     const existingBooking = await Booking.findById(req.params.id);
     if (!existingBooking) return res.status(404).json({ message: 'Booking not found' });
 
-    // If dates or extra beds changed, recalculate costs
-    if (req.body.checkIn || req.body.checkOut || req.body.extraBeds !== undefined) {
+    // If dates, extra beds, custom prices, or room discounts changed, recalculate costs
+    if (req.body.checkIn || req.body.checkOut || req.body.extraBeds !== undefined || req.body.customPrices !== undefined || req.body.roomDiscounts !== undefined) {
       const checkIn = req.body.checkIn || existingBooking.checkIn;
       const checkOut = req.body.checkOut || existingBooking.checkOut;
       const roomIds = existingBooking.rooms?.length ? existingBooking.rooms : [existingBooking.room];
       const extraBeds = req.body.extraBeds !== undefined ? req.body.extraBeds : existingBooking.extraBeds;
+      const customPrices = req.body.customPrices !== undefined ? req.body.customPrices : existingBooking.customPrices;
+      const roomDiscounts = req.body.roomDiscounts !== undefined ? req.body.roomDiscounts : existingBooking.roomDiscounts;
       const cgstRate = req.body.cgstRate !== undefined ? req.body.cgstRate : existingBooking.cgstRate;
       const sgstRate = req.body.sgstRate !== undefined ? req.body.sgstRate : existingBooking.sgstRate;
       const discount = req.body.discount !== undefined ? req.body.discount : existingBooking.discount;
@@ -196,9 +218,27 @@ exports.updateBooking = async (req, res) => {
       
       let totalRoomCost = 0;
       let totalExtraBedCost = 0;
+      let totalRoomDiscount = 0;
 
       for (const roomDoc of roomDocs) {
-        totalRoomCost += days * roomDoc.price;
+        // Check if there's a custom price for this room
+        const customPriceObj = customPrices?.find((cp) => cp.room.toString() === roomDoc._id.toString());
+        const roomPrice = customPriceObj ? Number(customPriceObj.price) : roomDoc.price;
+        const roomSubtotal = days * roomPrice;
+        
+        // Calculate room discount
+        const roomDiscountObj = roomDiscounts?.find((rd) => rd.room.toString() === roomDoc._id.toString());
+        let roomDiscountAmount = 0;
+        if (roomDiscountObj) {
+          if (roomDiscountObj.discountType === 'percentage') {
+            roomDiscountAmount = (roomSubtotal * Number(roomDiscountObj.discountValue)) / 100;
+          } else {
+            roomDiscountAmount = Number(roomDiscountObj.discountValue);
+          }
+        }
+        
+        totalRoomCost += roomSubtotal;
+        totalRoomDiscount += roomDiscountAmount;
 
         const eb = extraBeds?.find((e) => e.room.toString() === roomDoc._id.toString());
         if (eb?.chargePerDay && eb?.from && eb?.to) {
@@ -207,7 +247,7 @@ exports.updateBooking = async (req, res) => {
         }
       }
 
-      const taxableAmount = totalRoomCost + totalExtraBedCost;
+      const taxableAmount = totalRoomCost + totalExtraBedCost - totalRoomDiscount;
       const cgst = (taxableAmount * cgstRate) / 100;
       const sgst = (taxableAmount * sgstRate) / 100;
       const totalAmount = Math.round((taxableAmount + cgst + sgst - discount) * 100) / 100;

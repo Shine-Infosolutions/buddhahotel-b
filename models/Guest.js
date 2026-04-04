@@ -18,6 +18,8 @@ const guestSchema = new mongoose.Schema({
   companyDetails: { type: String },
   idType: { type: String, enum: ['passport', 'aadhar', 'driving_license', 'voter_id', 'other'] },
   idNumber: { type: String },
+  guestPhoto: { type: String },
+  idProofPhotos: [{ type: String }],
   isVIP: { type: Boolean, default: false },
 }, { timestamps: true });
 
