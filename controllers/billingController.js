@@ -81,10 +81,10 @@ exports.getInvoiceByBooking = async (req, res) => {
     }, 0);
 
     const taxableAmount = booking.taxableAmount || (roomRentAmount + extraBedTotal);
-    const cgstRate = booking.cgstRate || 2.5;
-    const sgstRate = booking.sgstRate || 2.5;
-    const cgstAmount = (taxableAmount * cgstRate) / 100;
-    const sgstAmount = (taxableAmount * sgstRate) / 100;
+    const cgstRate = booking.cgstRate ?? 0;
+    const sgstRate = booking.sgstRate ?? 0;
+    const cgstAmount = booking.cgstAmount ?? +(taxableAmount * cgstRate / 100).toFixed(2);
+    const sgstAmount = booking.sgstAmount ?? +(taxableAmount * sgstRate / 100).toFixed(2);
     const discount = booking.discount || 0;
     const grandTotal = booking.totalAmount || Math.round((taxableAmount + cgstAmount + sgstAmount - discount) * 100) / 100;
 
