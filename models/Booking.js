@@ -7,9 +7,17 @@ const advancePaymentSchema = new mongoose.Schema({
   note: { type: String },
 });
 
+const extraBedSchema = new mongoose.Schema({
+  room: { type: mongoose.Schema.Types.ObjectId, ref: 'Room' },
+  chargePerDay: { type: Number, default: 0 },
+  from: { type: Date },
+  to: { type: Date },
+});
+
 const bookingSchema = new mongoose.Schema({
   guest: { type: mongoose.Schema.Types.ObjectId, ref: 'Guest', required: true },
-  room: { type: mongoose.Schema.Types.ObjectId, ref: 'Room', required: true },
+  rooms: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Room' }],
+  room: { type: mongoose.Schema.Types.ObjectId, ref: 'Room' },
   checkIn: { type: Date, required: true },
   checkOut: { type: Date, required: true },
   checkInTime: { type: String, default: '12:00' },
@@ -17,10 +25,9 @@ const bookingSchema = new mongoose.Schema({
   numberOfRooms: { type: Number, default: 1 },
   arrivalFrom: { type: String },
   purposeOfVisit: { type: String },
-  extraBedChargePerDay: { type: Number, default: 0 },
+  extraBeds: [extraBedSchema],
   remarks: { type: String },
   status: { type: String, enum: ['booked', 'checked_in', 'checked_out', 'cancelled'], default: 'booked' },
-  // Payment
   taxableAmount: { type: Number, default: 0 },
   cgstRate: { type: Number, default: 2.5 },
   sgstRate: { type: Number, default: 2.5 },

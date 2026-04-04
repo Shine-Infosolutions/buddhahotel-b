@@ -90,6 +90,7 @@ exports.getBookings = async (req, res) => {
     const bookings = await Booking.find()
       .populate('guest')
       .populate({ path: 'room', populate: { path: 'category' } })
+      .populate({ path: 'rooms', populate: { path: 'category' } })
       .sort({ createdAt: -1 });
     res.json(bookings);
   } catch (err) {
@@ -99,7 +100,10 @@ exports.getBookings = async (req, res) => {
 
 exports.getBooking = async (req, res) => {
   try {
-    const booking = await Booking.findById(req.params.id).populate('guest').populate({ path: 'room', populate: { path: 'category' } });
+    const booking = await Booking.findById(req.params.id)
+      .populate('guest')
+      .populate({ path: 'room', populate: { path: 'category' } })
+      .populate({ path: 'rooms', populate: { path: 'category' } });
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
     res.json(booking);
   } catch (err) {
@@ -109,15 +113,16 @@ exports.getBooking = async (req, res) => {
 
 exports.createBooking = async (req, res) => {
   try {
-    const { rooms: roomIds, room, checkIn, checkOut, cgstRate = 2.5, sgstRate = 2.5, extraBedChargePerDay = 0, discount = 0 } = req.body;
+    const { rooms: roomIds, room, checkIn, checkOut, cgstRate = 2.5, sgstRate = 2.5, discount = 0, extraBeds = [] } = req.body;
 
-    // Support both single room and bulk rooms
     const selectedRoomIds = roomIds?.length ? roomIds : [room];
 
-    // Check all rooms are available for the date range
     const overlapping = await Booking.find({
       status: { $in: ['booked', 'checked_in'] },
-      room: { $in: selectedRoomIds },
+      $or: [
+        { room: { $in: selectedRoomIds } },
+        { rooms: { $in: selectedRoomIds } }
+      ],
       checkIn: { $lt: new Date(checkOut) },
       checkOut: { $gt: new Date(checkIn) },
     });
@@ -126,22 +131,46 @@ exports.createBooking = async (req, res) => {
     const roomDocs = await Room.find({ _id: { $in: selectedRoomIds } });
     const days = Math.max(1, Math.ceil((new Date(checkOut) - new Date(checkIn)) / (1000 * 60 * 60 * 24)));
 
-    const bookings = [];
+    // Calculate total cost for all rooms
+    let totalRoomCost = 0;
+    let totalExtraBedCost = 0;
+
     for (const roomDoc of roomDocs) {
-      const roomCost = days * roomDoc.price;
-      const extraBedCost = extraBedChargePerDay * days;
-      const taxableAmount = roomCost + extraBedCost;
-      const cgst = (taxableAmount * cgstRate) / 100;
-      const sgst = (taxableAmount * sgstRate) / 100;
-      const totalAmount = Math.round((taxableAmount + cgst + sgst - discount) * 100) / 100;
-      const grcNumber = await generateGRC();
-      const invoiceNumber = await generateInvoice(checkIn);
-      const booking = await Booking.create({ ...req.body, room: roomDoc._id, taxableAmount, totalAmount, status: req.body.status || 'booked', grcNumber, invoiceNumber });
-      await Room.findByIdAndUpdate(roomDoc._id, { status: 'occupied' });
-      bookings.push(booking);
+      totalRoomCost += days * roomDoc.price;
+
+      // Find extra bed for this room
+      const eb = extraBeds.find((e) => e.room === roomDoc._id.toString());
+      if (eb?.chargePerDay && eb?.from && eb?.to) {
+        const ebDays = Math.max(1, Math.ceil((new Date(eb.to) - new Date(eb.from)) / (1000 * 60 * 60 * 24)));
+        totalExtraBedCost += Number(eb.chargePerDay) * ebDays;
+      }
     }
 
-    res.status(201).json(bookings.length === 1 ? bookings[0] : bookings);
+    const taxableAmount = totalRoomCost + totalExtraBedCost;
+    const cgst = (taxableAmount * cgstRate) / 100;
+    const sgst = (taxableAmount * sgstRate) / 100;
+    const totalAmount = Math.round((taxableAmount + cgst + sgst - discount) * 100) / 100;
+    const grcNumber = await generateGRC();
+    const invoiceNumber = await generateInvoice(checkIn);
+
+    // Create single booking with multiple rooms
+    const booking = await Booking.create({
+      ...req.body,
+      rooms: selectedRoomIds,
+      room: selectedRoomIds[0], // Keep first room for backward compatibility
+      taxableAmount,
+      totalAmount,
+      extraBeds,
+      status: req.body.status || 'booked',
+      grcNumber,
+      invoiceNumber,
+      numberOfRooms: selectedRoomIds.length,
+    });
+
+    // Update all rooms to occupied
+    await Room.updateMany({ _id: { $in: selectedRoomIds } }, { status: 'occupied' });
+
+    res.status(201).json(booking);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -149,15 +178,56 @@ exports.createBooking = async (req, res) => {
 
 exports.updateBooking = async (req, res) => {
   try {
+    const existingBooking = await Booking.findById(req.params.id);
+    if (!existingBooking) return res.status(404).json({ message: 'Booking not found' });
+
+    // If dates or extra beds changed, recalculate costs
+    if (req.body.checkIn || req.body.checkOut || req.body.extraBeds !== undefined) {
+      const checkIn = req.body.checkIn || existingBooking.checkIn;
+      const checkOut = req.body.checkOut || existingBooking.checkOut;
+      const roomIds = existingBooking.rooms?.length ? existingBooking.rooms : [existingBooking.room];
+      const extraBeds = req.body.extraBeds !== undefined ? req.body.extraBeds : existingBooking.extraBeds;
+      const cgstRate = req.body.cgstRate !== undefined ? req.body.cgstRate : existingBooking.cgstRate;
+      const sgstRate = req.body.sgstRate !== undefined ? req.body.sgstRate : existingBooking.sgstRate;
+      const discount = req.body.discount !== undefined ? req.body.discount : existingBooking.discount;
+
+      const roomDocs = await Room.find({ _id: { $in: roomIds } });
+      const days = Math.max(1, Math.ceil((new Date(checkOut) - new Date(checkIn)) / (1000 * 60 * 60 * 24)));
+      
+      let totalRoomCost = 0;
+      let totalExtraBedCost = 0;
+
+      for (const roomDoc of roomDocs) {
+        totalRoomCost += days * roomDoc.price;
+
+        const eb = extraBeds?.find((e) => e.room.toString() === roomDoc._id.toString());
+        if (eb?.chargePerDay && eb?.from && eb?.to) {
+          const ebDays = Math.max(1, Math.ceil((new Date(eb.to) - new Date(eb.from)) / (1000 * 60 * 60 * 24)));
+          totalExtraBedCost += Number(eb.chargePerDay) * ebDays;
+        }
+      }
+
+      const taxableAmount = totalRoomCost + totalExtraBedCost;
+      const cgst = (taxableAmount * cgstRate) / 100;
+      const sgst = (taxableAmount * sgstRate) / 100;
+      const totalAmount = Math.round((taxableAmount + cgst + sgst - discount) * 100) / 100;
+
+      req.body.taxableAmount = taxableAmount;
+      req.body.totalAmount = totalAmount;
+    }
+
     const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true })
       .populate('guest')
-      .populate({ path: 'room', populate: { path: 'category' } });
-    if (!booking) return res.status(404).json({ message: 'Booking not found' });
+      .populate({ path: 'room', populate: { path: 'category' } })
+      .populate({ path: 'rooms', populate: { path: 'category' } });
+    
     if (req.body.status === 'checked_in') {
-      await Room.findByIdAndUpdate(booking.room?._id || booking.room, { status: 'occupied' });
+      const roomIds = booking.rooms?.length ? booking.rooms : [booking.room];
+      await Room.updateMany({ _id: { $in: roomIds } }, { status: 'occupied' });
     }
     if (req.body.status === 'checked_out' || req.body.status === 'cancelled') {
-      await Room.findByIdAndUpdate(booking.room?._id || booking.room, { status: 'available' });
+      const roomIds = booking.rooms?.length ? booking.rooms : [booking.room];
+      await Room.updateMany({ _id: { $in: roomIds } }, { status: 'available' });
     }
     res.json(booking);
   } catch (err) {
@@ -169,7 +239,8 @@ exports.deleteBooking = async (req, res) => {
   try {
     const booking = await Booking.findByIdAndDelete(req.params.id);
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
-    await Room.findByIdAndUpdate(booking.room, { status: 'available' });
+    const roomIds = booking.rooms?.length ? booking.rooms : [booking.room];
+    await Room.updateMany({ _id: { $in: roomIds } }, { status: 'available' });
     res.json({ message: 'Booking deleted' });
   } catch (err) {
     res.status(500).json({ message: err.message });
