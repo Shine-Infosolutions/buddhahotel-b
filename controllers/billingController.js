@@ -65,22 +65,80 @@ exports.getInvoiceByBooking = async (req, res) => {
     const Booking = require('../models/Booking');
     const booking = await Booking.findById(req.params.bookingId)
       .populate('guest')
-      .populate({ path: 'room', populate: { path: 'category' } });
+      .populate({ path: 'room', populate: { path: 'category' } })
+      .populate({ path: 'rooms', populate: { path: 'category' } });
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
 
     const days = Math.max(1, Math.ceil((new Date(booking.checkOut) - new Date(booking.checkIn)) / (1000 * 60 * 60 * 24)));
-    const roomRate = booking.room?.price || 0;
-    const roomRentAmount = roomRate * days;
+    
+    // Support both single room and multiple rooms
+    const rooms = booking.rooms?.length ? booking.rooms : (booking.room ? [booking.room] : []);
+    
+    const items = [];
+    let totalRoomRent = 0;
+    
+    // Add each room as a separate line item with daily breakdown
+    rooms.forEach((room) => {
+      // Check for custom price
+      const customPriceObj = booking.customPrices?.find(cp => cp.room.toString() === room._id.toString());
+      const roomRate = customPriceObj ? customPriceObj.price : room.price;
+      const roomSubtotal = roomRate * days;
+      
+      // Check for room discount
+      const roomDiscountObj = booking.roomDiscounts?.find(rd => rd.room.toString() === room._id.toString());
+      let roomDiscountAmount = 0;
+      if (roomDiscountObj) {
+        if (roomDiscountObj.discountType === 'percentage') {
+          roomDiscountAmount = (roomSubtotal * roomDiscountObj.discountValue) / 100;
+        } else {
+          roomDiscountAmount = roomDiscountObj.discountValue;
+        }
+      }
+      
+      const roomAmount = roomSubtotal - roomDiscountAmount;
+      totalRoomRent += roomAmount;
+      
+      // Generate daily entries for each night
+      for (let i = 0; i < days; i++) {
+        const currentDate = new Date(booking.checkIn);
+        currentDate.setDate(currentDate.getDate() + i);
+        
+        items.push({
+          date: currentDate.toLocaleDateString('en-GB'),
+          particulars: `Room Rent ${room.category?.name || ''} (Room: ${room.roomNumber})${customPriceObj ? ' (Custom Rate)' : ''}${roomDiscountAmount > 0 && i === 0 ? ` - Discount ${roomDiscountObj.discountType === 'percentage' ? roomDiscountObj.discountValue + '%' : '₹' + roomDiscountAmount}` : ''}`,
+          roomRate,
+          declaredRate: i === 0 ? roomAmount : null,
+          hsn: i === 0 ? 996311 : null,
+          taxRate: (booking.cgstRate || 0) + (booking.sgstRate || 0),
+          amount: i === 0 ? roomAmount : null,
+        });
+      }
+    });
 
     // Calculate extra bed total from extraBeds array
-    const extraBedTotal = (booking.extraBeds || []).reduce((sum, eb) => {
+    let extraBedTotal = 0;
+    (booking.extraBeds || []).forEach((eb) => {
       const ebFrom = eb.from ? new Date(eb.from) : new Date(booking.checkIn);
       const ebTo = eb.to ? new Date(eb.to) : new Date(booking.checkOut);
       const ebDays = Math.max(1, Math.ceil((ebTo - ebFrom) / (1000 * 60 * 60 * 24)));
-      return sum + (eb.chargePerDay || 0) * ebDays;
-    }, 0);
+      const ebAmount = (eb.chargePerDay || 0) * ebDays;
+      if (ebAmount > 0) {
+        extraBedTotal += ebAmount;
+        // Find which room this extra bed belongs to
+        const room = rooms.find(r => r._id.toString() === eb.room.toString());
+        items.push({
+          date: ebFrom.toLocaleDateString('en-GB'),
+          particulars: `Extra Bed Charge - Room ${room?.roomNumber || ''} (${ebDays} night${ebDays > 1 ? 's' : ''} × ₹${eb.chargePerDay})`,
+          roomRate: eb.chargePerDay,
+          declaredRate: ebAmount,
+          hsn: 996311,
+          taxRate: (booking.cgstRate || 0) + (booking.sgstRate || 0),
+          amount: ebAmount,
+        });
+      }
+    });
 
-    const taxableAmount = booking.taxableAmount || (roomRentAmount + extraBedTotal);
+    const taxableAmount = booking.taxableAmount || (totalRoomRent + extraBedTotal);
     const cgstRate = booking.cgstRate ?? 0;
     const sgstRate = booking.sgstRate ?? 0;
     const cgstAmount = booking.cgstAmount ?? +(taxableAmount * cgstRate / 100).toFixed(2);
@@ -88,45 +146,19 @@ exports.getInvoiceByBooking = async (req, res) => {
     const discount = booking.discount || 0;
     const grandTotal = booking.totalAmount || Math.round((taxableAmount + cgstAmount + sgstAmount - discount) * 100) / 100;
 
-    const items = [];
-    items.push({
-      date: new Date(booking.checkIn).toLocaleDateString('en-GB'),
-      particulars: `Room Rent ${booking.room?.category?.name || ''} (Room: ${booking.room?.roomNumber || ''})`,
-      roomRate,
-      declaredRate: roomRentAmount,
-      hsn: 996311,
-      taxRate: cgstRate + sgstRate,
-      amount: roomRentAmount,
-    });
-
-    // Add each extra bed as a separate line item
-    (booking.extraBeds || []).forEach((eb) => {
-      const ebFrom = eb.from ? new Date(eb.from) : new Date(booking.checkIn);
-      const ebTo = eb.to ? new Date(eb.to) : new Date(booking.checkOut);
-      const ebDays = Math.max(1, Math.ceil((ebTo - ebFrom) / (1000 * 60 * 60 * 24)));
-      const ebAmount = (eb.chargePerDay || 0) * ebDays;
-      if (ebAmount > 0) {
-        items.push({
-          date: ebFrom.toLocaleDateString('en-GB'),
-          particulars: `Extra Bed Charge (${ebDays} night${ebDays > 1 ? 's' : ''} × ₹${eb.chargePerDay})`,
-          roomRate: eb.chargePerDay,
-          declaredRate: ebAmount,
-          hsn: 996311,
-          taxRate: cgstRate + sgstRate,
-          amount: ebAmount,
-        });
-      }
-    });
-
     const totalAdvance = (booking.advancePayments || []).reduce((s, p) => s + (p.amount || 0), 0);
+    
+    // Get all room numbers
+    const roomNumbers = rooms.map(r => r.roomNumber).join(', ');
+    const roomTypes = [...new Set(rooms.map(r => r.category?.name).filter(Boolean))].join(', ');
 
     res.json({
       invoiceDetails: {
         invoiceNumber: booking.invoiceNumber,
         invoiceDate: new Date().toLocaleDateString('en-GB'),
         grcNumber: booking.grcNumber,
-        roomNumber: booking.room?.roomNumber,
-        roomType: booking.room?.category?.name,
+        roomNumber: roomNumbers,
+        roomType: roomTypes,
         checkIn: new Date(booking.checkIn).toLocaleDateString('en-GB'),
         checkOut: new Date(booking.checkOut).toLocaleDateString('en-GB'),
         checkInTime: booking.checkInTime || '12:00',
@@ -154,7 +186,7 @@ exports.getInvoiceByBooking = async (req, res) => {
         sgstAmount: +sgstAmount.toFixed(2),
       },
       summary: {
-        roomAmount: roomRentAmount,
+        roomAmount: totalRoomRent,
         extraBedAmount: extraBedTotal,
         taxableAmount,
         cgstAmount: +cgstAmount.toFixed(2),

@@ -27,6 +27,7 @@ const roomDiscountSchema = new mongoose.Schema({
 
 const bookingSchema = new mongoose.Schema({
   guest: { type: mongoose.Schema.Types.ObjectId, ref: 'Guest', required: true },
+  additionalGuests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Guest' }],
   rooms: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Room' }],
   room: { type: mongoose.Schema.Types.ObjectId, ref: 'Room' },
   checkIn: { type: Date, required: true },
@@ -34,6 +35,8 @@ const bookingSchema = new mongoose.Schema({
   checkInTime: { type: String, default: '12:00' },
   checkOutTime: { type: String, default: '12:00' },
   numberOfRooms: { type: Number, default: 1 },
+  adults: { type: Number, default: 1 },
+  children: { type: Number, default: 0 },
   arrivalFrom: { type: String },
   purposeOfVisit: { type: String },
   extraBeds: [extraBedSchema],

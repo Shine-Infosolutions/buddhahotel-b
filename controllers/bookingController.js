@@ -2,9 +2,16 @@ const Booking = require('../models/Booking');
 const Room = require('../models/Room');
 
 const generateGRC = async () => {
-  const last = await Booking.findOne({ grcNumber: { $exists: true } }).sort({ createdAt: -1 }).select('grcNumber');
-  const lastNum = last ? parseInt(last.grcNumber.replace('GRC', ''), 10) : 0;
-  return `GRC${String(lastNum + 1).padStart(4, '0')}`;
+  const currentYear = new Date().getFullYear() % 100; // Get last 2 digits of year (e.g., 26 for 2026)
+  const yearPrefix = `GRC${currentYear}`;
+  
+  // Find the last GRC for the current year
+  const last = await Booking.findOne({ 
+    grcNumber: { $regex: `^${yearPrefix}` } 
+  }).sort({ createdAt: -1 }).select('grcNumber');
+  
+  const lastNum = last ? parseInt(last.grcNumber.replace(yearPrefix, ''), 10) : 0;
+  return `${yearPrefix}${String(lastNum + 1).padStart(4, '0')}`;
 };
 
 const generateInvoice = async (checkIn) => {
@@ -89,6 +96,7 @@ exports.getBookings = async (req, res) => {
   try {
     const bookings = await Booking.find()
       .populate('guest')
+      .populate('additionalGuests')
       .populate({ path: 'room', populate: { path: 'category' } })
       .populate({ path: 'rooms', populate: { path: 'category' } })
       .sort({ createdAt: -1 });
@@ -102,6 +110,7 @@ exports.getBooking = async (req, res) => {
   try {
     const booking = await Booking.findById(req.params.id)
       .populate('guest')
+      .populate('additionalGuests')
       .populate({ path: 'room', populate: { path: 'category' } })
       .populate({ path: 'rooms', populate: { path: 'category' } });
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
@@ -258,6 +267,7 @@ exports.updateBooking = async (req, res) => {
 
     const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true })
       .populate('guest')
+      .populate('additionalGuests')
       .populate({ path: 'room', populate: { path: 'category' } })
       .populate({ path: 'rooms', populate: { path: 'category' } });
     
