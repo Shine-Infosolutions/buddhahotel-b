@@ -1,5 +1,6 @@
 const Booking = require('../models/Booking');
 const Room = require('../models/Room');
+const { sendBookingConfirmation } = require('../utils/sendEmail');
 
 const generateGRC = async () => {
   const currentYear = new Date().getFullYear() % 100; // Get last 2 digits of year (e.g., 26 for 2026)
@@ -280,6 +281,20 @@ exports.updateBooking = async (req, res) => {
       await Room.updateMany({ _id: { $in: roomIds } }, { status: 'available' });
     }
     res.json(booking);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.sendConfirmation = async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id)
+      .populate('guest')
+      .populate({ path: 'rooms', populate: { path: 'category' } });
+    if (!booking) return res.status(404).json({ message: 'Booking not found' });
+    const pdfBuffer = req.body.pdf ? Buffer.from(req.body.pdf, 'base64') : null;
+    await sendBookingConfirmation(booking, pdfBuffer);
+    res.json({ message: 'Confirmation email sent successfully' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
