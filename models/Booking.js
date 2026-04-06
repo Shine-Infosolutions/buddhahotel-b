@@ -39,6 +39,8 @@ const bookingSchema = new mongoose.Schema({
   children: { type: Number, default: 0 },
   arrivalFrom: { type: String },
   purposeOfVisit: { type: String },
+  vehicleNumber: { type: String },
+  vehicleType: { type: String },
   extraBeds: [extraBedSchema],
   customPrices: [customPriceSchema],
   roomDiscounts: [roomDiscountSchema],
