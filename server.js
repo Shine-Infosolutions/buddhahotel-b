@@ -9,7 +9,8 @@ connectDB();
 const app = express();
 
 app.use(cors({ origin: 'http://localhost:5174' }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/rooms', require('./routes/rooms'));
