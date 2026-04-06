@@ -196,7 +196,7 @@ exports.getInvoiceByBooking = async (req, res) => {
         totalAdvance,
         balanceDue: Math.max(0, grandTotal - totalAdvance),
       },
-      advancePayments: booking.advancePayments || [],
+      advancePayments: booking.advancePayments?.filter(ap => !ap.isFinalPayment) || [],
       billingInstruction: booking.billingInstruction,
     });
   } catch (err) {
