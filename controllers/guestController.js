@@ -37,6 +37,10 @@ exports.createGuest = async (req, res) => {
 exports.updateGuest = async (req, res) => {
   try {
     const { _id, __v, createdAt, updatedAt, existingIdProofPhotos, ...data } = req.body;
+    // Strip empty date strings to avoid cast errors
+    ['dateOfBirth', 'anniversaryDate'].forEach((f) => {
+      if (!data[f] || data[f] === 'null' || data[f] === '') delete data[f];
+    });
     const existingGuest = await Guest.findById(req.params.id);
     if (!existingGuest) return res.status(404).json({ message: 'Guest not found' });
     
