@@ -9,7 +9,7 @@ connectDB();
 const app = express();
 
 app.use(cors({ 
-  origin: [process.env.FRONTEND_URL || 'http://localhost:5174', 'https://buddhahotel-b.vercel.app'],
+  origin: [process.env.FRONTEND_URL || 'http://localhost:5174', 'https://buddhahotel-b.vercel.app','https://buddhahotel-f.vercel.app'],
   credentials: true 
 }));
 app.use(express.json({ limit: '10mb' }));
