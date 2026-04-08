@@ -58,6 +58,7 @@ const bookingSchema = new mongoose.Schema({
   billingInstruction: { type: String },
   grcNumber: { type: String, unique: true },
   invoiceNumber: { type: String, unique: true },
+  reminderSent: { type: Boolean, default: false },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Booking', bookingSchema);

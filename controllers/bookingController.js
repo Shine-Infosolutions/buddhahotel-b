@@ -275,6 +275,7 @@ exports.updateBooking = async (req, res) => {
     if (req.body.status === 'checked_in') {
       const roomIds = booking.rooms?.length ? booking.rooms : [booking.room];
       await Room.updateMany({ _id: { $in: roomIds } }, { status: 'occupied' });
+      await Booking.findByIdAndUpdate(req.params.id, { reminderSent: false });
     }
     if (req.body.status === 'checked_out' || req.body.status === 'cancelled') {
       const roomIds = booking.rooms?.length ? booking.rooms : [booking.room];
