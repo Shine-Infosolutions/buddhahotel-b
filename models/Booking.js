@@ -5,6 +5,7 @@ const advancePaymentSchema = new mongoose.Schema({
   method: { type: String },
   date: { type: Date, default: Date.now },
   note: { type: String },
+  isFinalPayment: { type: Boolean, default: false },
 });
 
 const extraBedSchema = new mongoose.Schema({
@@ -39,6 +40,8 @@ const bookingSchema = new mongoose.Schema({
   children: { type: Number, default: 0 },
   arrivalFrom: { type: String },
   purposeOfVisit: { type: String },
+  vehicleNumber: { type: String },
+  vehicleType: { type: String },
   extraBeds: [extraBedSchema],
   customPrices: [customPriceSchema],
   roomDiscounts: [roomDiscountSchema],
